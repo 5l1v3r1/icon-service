@@ -158,6 +158,7 @@ class Account(object):
         if total < value:
             raise InvalidParamsException(f'Failed to stake: total{total} < stake{value}')
 
+        # total_stake == stake + unstaking
         offset: int = value - self.total_stake
 
         if offset == 0:

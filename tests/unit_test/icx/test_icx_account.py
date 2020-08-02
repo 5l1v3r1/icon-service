@@ -16,8 +16,9 @@
 # limitations under the License.
 
 
-import unittest
 from unittest.mock import Mock
+
+import pytest
 
 from iconservice import Address
 from iconservice.base.exception import InvalidParamsException, OutOfBalanceException
@@ -30,69 +31,73 @@ from iconservice.icx.stake_part import StakePart
 from tests import create_address
 
 
-class TestAccount(unittest.TestCase):
+class TestAccount:
     def test_account_flag(self):
         address: 'Address' = create_address()
 
         account: 'Account' = Account(address, 0, Revision.IISS.value)
-        self.assertIsNone(account.coin_part)
-        self.assertIsNone(account.stake_part)
-        self.assertIsNone(account.delegation_part)
+        assert account.coin_part is None
+        assert account.stake_part is None
+        assert account.delegation_part is None
 
         coin_part: 'CoinPart' = CoinPart()
         account: 'Account' = Account(address, 0, Revision.IISS.value, coin_part=coin_part)
-        self.assertIsNotNone(account.coin_part)
-        self.assertIsNone(account.stake_part)
-        self.assertIsNone(account.delegation_part)
+        assert account.coin_part is not None
+        assert account.stake_part is None
+        assert account.delegation_part is None
 
         stake_part: 'StakePart' = StakePart()
         account: 'Account' = Account(address, 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertIsNone(account.coin_part)
-        self.assertIsNotNone(account.stake_part)
-        self.assertIsNone(account.delegation_part)
+        assert account.coin_part is None
+        assert account.stake_part is not None
+        assert account.delegation_part is None
 
         delegation_part: 'DelegationPart' = DelegationPart()
         account: 'Account' = Account(address, 0, Revision.IISS.value, delegation_part=delegation_part)
-        self.assertIsNone(account.coin_part)
-        self.assertIsNone(account.stake_part)
-        self.assertIsNotNone(account.delegation_part)
+        assert account.coin_part is None
+        assert account.stake_part is None
+        assert account.delegation_part is not None
 
         account: 'Account' = Account(address, 0, Revision.IISS.value,
                                      coin_part=coin_part,
                                      stake_part=stake_part,
                                      delegation_part=delegation_part)
-        self.assertIsNotNone(account.coin_part)
-        self.assertIsNotNone(account.stake_part)
-        self.assertIsNotNone(account.delegation_part)
+        assert account.coin_part is not None
+        assert account.stake_part is not None
+        assert account.delegation_part is not None
 
     def test_coin_part(self):
         address: 'Address' = create_address()
 
         coin_part: 'CoinPart' = CoinPart()
         account: 'Account' = Account(address, 0, Revision.IISS.value, coin_part=coin_part)
-        self.assertEqual(address, account.address)
-        self.assertEqual(0, account.balance)
+        assert account.address == address
+        assert account.balance == 0
 
         account.deposit(100)
-        self.assertEqual(100, account.balance)
+        assert account.balance == 100
 
         account.withdraw(100)
-        self.assertEqual(0, account.balance)
+        assert account.balance == 0
 
         # wrong value
-        self.assertRaises(InvalidParamsException, account.deposit, -10)
+        with pytest.raises(InvalidParamsException):
+            account.deposit(-10)
 
         # 0 transfer is possible
         old = account.balance
         account.deposit(0)
-        self.assertEqual(old, account.balance)
+        assert account.balance == old
 
-        self.assertRaises(InvalidParamsException, account.withdraw, -11234)
-        self.assertRaises(OutOfBalanceException, account.withdraw, 1)
+        with pytest.raises(InvalidParamsException):
+            account.withdraw(-11234)
+
+        with pytest.raises(OutOfBalanceException):
+            account.withdraw(1)
 
         old = account.balance
         account.withdraw(0)
-        self.assertEqual(old, account.balance)
+        assert account.balance == old
 
     def test_account_for_stake(self):
         address: 'Address' = create_address()
@@ -111,10 +116,10 @@ class TestAccount(unittest.TestCase):
 
         account.set_stake(context, stake1, 0)
 
-        self.assertEqual(stake1, account.stake)
-        self.assertEqual(0, account.unstake)
-        self.assertEqual(unstake_block_height, account.unstake_block_height)
-        self.assertEqual(remain_balance, account.balance)
+        assert account.stake == stake1
+        assert account.unstake == 0
+        assert account.unstake_block_height == unstake_block_height
+        assert account.balance == remain_balance
 
         stake2 = 100
         block_height = 10
@@ -122,63 +127,86 @@ class TestAccount(unittest.TestCase):
         remain_balance = balance - stake1
         account.set_stake(context, stake2, block_height)
 
-        self.assertEqual(stake2, account.stake)
-        self.assertEqual(unstake, account.unstake)
-        self.assertEqual(block_height, account.unstake_block_height)
-        self.assertEqual(remain_balance, account.balance)
+        assert account.stake == stake2
+        assert account.unstake == unstake
+        assert account.unstake_block_height == block_height
+        assert account.balance == remain_balance
 
         remain_balance = remain_balance + unstake
         account._current_block_height += 11
         account.normalize(Revision.IISS.value)
-        self.assertEqual(remain_balance, account.balance)
+        assert account.balance == remain_balance
 
     def test_account_for_stake_rev_multiple_unstake1(self):
         address: 'Address' = create_address()
         context: 'IconScoreContext' = Mock(spec=IconScoreContext)
         unstake_slot_max = 10
+        current_block_height = 7
+        unstake_lock_period = 100
+
         context.configure_mock(unstake_slot_max=unstake_slot_max)
         context.configure_mock(revision=Revision.MULTIPLE_UNSTAKE.value)
 
         coin_part: 'CoinPart' = CoinPart()
         stake_part: 'StakePart' = StakePart()
-        account = Account(address, 0, Revision.MULTIPLE_UNSTAKE.value, coin_part=coin_part, stake_part=stake_part)
+        account = Account(
+            address, current_block_height,
+            Revision.MULTIPLE_UNSTAKE.value,
+            coin_part=coin_part, stake_part=stake_part
+        )
 
         balance = 1000
         account.deposit(balance)
+        assert account.balance == balance
 
+        # stake: 0 -> 500
+        # unstake: 0 -> 0
+        # balance: 1000 -> 500
         stake1 = 500
-        unstake_block_height = 0
         remain_balance = balance - stake1
 
-        account.set_stake(context, stake1, 0)
+        account.set_stake(context, stake1, unstake_lock_period)
+        assert account.stake == stake1
+        assert account.unstake == 0
+        assert account.unstake_block_height == 0
+        assert account.balance == remain_balance
+        assert account.balance + account.total_stake == balance
 
-        self.assertEqual(stake1, account.stake)
-        self.assertEqual(0, account.unstake)
-        self.assertEqual(unstake_block_height, account.unstake_block_height)
-        self.assertEqual(remain_balance, account.balance)
-
+        # stake: 500 -> 100
+        # unstake: 0 -> 400
+        # balance: 500 -> 500
         stake2 = 100
-        block_height = 10
         unstake = stake1 - stake2
         remain_balance = balance - stake1
-        account.set_stake(context, stake2, block_height)
-        expected_unstake_info = [[unstake, block_height]]
+        expected_unstake_info = [[unstake, current_block_height + unstake_lock_period]]
+        account.set_stake(context, stake2, unstake_lock_period)
+        assert account.stake == stake2
+        assert account.unstake == 0
+        assert account.unstake_block_height == 0
+        assert account.unstakes_info == expected_unstake_info
+        assert account.balance == remain_balance
+        assert account.balance + account.total_stake == balance
 
-        self.assertEqual(stake2, account.stake)
-        self.assertEqual(0, account.unstake)
-        self.assertEqual(0, account.unstake_block_height)
-        self.assertEqual(expected_unstake_info, account.unstakes_info)
-        self.assertEqual(remain_balance, account.balance)
+        # stake: 100 -> 300
+        # unstake: 400 -> 200
+        # balance: 500 -> 500
+        stake = 300
+        account.set_stake(context, stake, unstake_lock_period)
+        expected_unstake_info = [[200, current_block_height + unstake_lock_period]]
+        assert account.stake == stake
+        assert account.unstakes_info == expected_unstake_info
+        assert account.balance == 500
+        assert account.balance + account.total_stake == balance
 
-        stake3 = 600
-        block_height = 15
-        account.set_stake(context, stake3, block_height)
-        expected_unstake_info = []
-        expected_balance = 400
-
-        self.assertEqual(stake3, account.stake)
-        self.assertEqual(expected_unstake_info, account.unstakes_info)
-        self.assertEqual(expected_balance, account.balance)
+        # stake: 300 -> 1000
+        # unstake: 200 -> 0
+        # balance: 500 -> 0
+        stake = 1000
+        account.set_stake(context, stake, unstake_lock_period)
+        assert account.stake == stake
+        assert account.balance == 0
+        assert account.unstakes_info == []
+        assert account.balance + account.total_stake == balance
 
     def test_account_for_unstake_slot_max_case_1(self):
         address: 'Address' = create_address()
@@ -200,10 +228,10 @@ class TestAccount(unittest.TestCase):
 
         account.set_stake(context, stake, 0)
 
-        self.assertEqual(stake, account.stake)
-        self.assertEqual(0, account.unstake)
-        self.assertEqual(unstake_block_height, account.unstake_block_height)
-        self.assertEqual(remain_balance, account.balance)
+        assert account.stake == stake
+        assert account.unstake == 0
+        assert account.unstake_block_height == unstake_block_height
+        assert account.balance == remain_balance
 
         unstake = 1
         total_unstake = 0
@@ -213,14 +241,14 @@ class TestAccount(unittest.TestCase):
             stake -= unstake
             total_unstake += unstake
             account.set_stake(context, account.stake - unstake, unstake_slot_max + i)
-            self.assertEqual(stake, account.stake)
-            self.assertEqual(total_unstake, account.stake_part.total_unstake)
-            self.assertEqual(remain_balance, account.balance)
-            self.assertEqual(expected_unstake_info, account.unstakes_info)
+            assert account.stake == stake
+            assert account.stake_part.total_unstake == total_unstake
+            assert account.balance == remain_balance
+            assert account.unstakes_info == expected_unstake_info
         last_unstake = 100
         account.set_stake(context, account.stake - last_unstake, unstake_slot_max + 2)
         expected_unstake_info[-1] = [101, unstake_slot_max*2 - 1]
-        self.assertEqual(expected_unstake_info, account.unstakes_info)
+        assert account.unstakes_info == expected_unstake_info
 
     def test_account_for_delegation(self):
         target_accounts = []
@@ -240,90 +268,90 @@ class TestAccount(unittest.TestCase):
             preps.append((address, 10))
 
         src_account.set_delegations(preps)
-        self.assertEqual(10, len(src_account.delegation_part.delegations))
+        assert len(src_account.delegation_part.delegations) == 10
 
         for i in range(10):
-            self.assertEqual(10, target_accounts[i].delegation_part.delegated_amount)
+            assert target_accounts[i].delegation_part.delegated_amount == 10
 
     def test_account_balance(self):
         value: int = 0
         coin_part = Mock(spec=CoinPart, balance=value)
         account = Account(create_address(), 0, Revision.IISS.value, coin_part=coin_part)
-        self.assertEqual(value, account.balance)
+        assert account.balance == value
 
         value: int = 100
         coin_part = Mock(spec=CoinPart, balance=value)
         account = Account(create_address(), 0, Revision.IISS.value, coin_part=coin_part)
-        self.assertEqual(value, account.balance)
+        assert account.balance == value
 
     def test_account_stake(self):
         value: int = 0
         stake_part = StakePart(stake=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(value, account.stake)
+        assert account.stake == value
 
         value: int = 100
         stake_part = StakePart(stake=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(value, account.stake)
+        assert account.stake == value
 
     def test_account_unstake(self):
         value: int = 0
         stake_part = StakePart(unstake=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(0, account.unstake)
+        assert account.unstake == 0
 
         value: int = 200
         stake_part = StakePart(unstake=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(value, account.unstake)
+        assert account.unstake == value
 
     def test_account_unstake_block_height(self):
         value: int = 0
         stake_part = StakePart(unstake_block_height=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(0, account.unstake_block_height)
+        assert account.unstake_block_height == 0
 
         value: int = 300
         stake_part = StakePart(unstake_block_height=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.IISS.value, stake_part=stake_part)
-        self.assertEqual(value, account.unstake_block_height)
+        assert account.unstake_block_height == value
 
     def test_account_unstakes_info(self):
         value: int = 0
         stake_part = StakePart(unstake=value)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.MULTIPLE_UNSTAKE.value, stake_part=stake_part)
-        self.assertEqual([], account.unstakes_info)
+        assert account.unstakes_info == []
 
         info = [(10, 1), (20, 5)]
         stake_part = StakePart(unstakes_info=info)
         stake_part.set_complete(True)
         account = Account(create_address(), 0, Revision.MULTIPLE_UNSTAKE.value, stake_part=stake_part)
-        self.assertEqual(info, account.unstakes_info)
+        assert account.unstakes_info == info
 
     def test_account_delegated_amount(self):
         value: int = 0
         delegation_part = DelegationPart(delegated_amount=value)
         account = Account(create_address(), 0, Revision.IISS.value, delegation_part=delegation_part)
-        self.assertEqual(value, account.delegated_amount)
+        assert account.delegated_amount == value
 
         value: int = 100
         delegation_part = DelegationPart(delegated_amount=value)
         account = Account(create_address(), 0, Revision.IISS.value, delegation_part=delegation_part)
-        self.assertEqual(value, account.delegated_amount)
+        assert account.delegated_amount == value
 
     def test_account_delegations(self):
         value: list = []
         delegation_part = DelegationPart(delegations=value)
         account = Account(create_address(), 0, Revision.IISS.value, delegation_part=delegation_part)
-        self.assertEqual(value, account.delegations)
+        assert account.delegations == value
 
         delegations = [
             (create_address(), 100),
@@ -332,9 +360,5 @@ class TestAccount(unittest.TestCase):
         ]
         delegation_part = DelegationPart(delegations=delegations)
         account = Account(create_address(), 0, Revision.IISS.value, delegation_part=delegation_part)
-        self.assertEqual(delegations, account.delegations)
-        self.assertEqual(600, account.delegations_amount)
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert account.delegations == delegations
+        assert account.delegations_amount == 600
